@@ -1,5 +1,5 @@
+mod lexer;
 mod parser;
-mod tokenizer;
 fn main() {
-    println!("hi");
+    todo!();
 }

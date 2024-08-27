@@ -1,13 +1,18 @@
 use std::str::Chars;
 
-#[derive(PartialEq, Clone, Debug)]
-enum TokenKind {
+#[cfg(test)]
+mod tests;
+
+#[derive(PartialEq, Debug)]
+pub enum TokenKind {
     LineComment,
-    BlockComment,
+    BlockComment { is_closed: bool },
     VerticalWhitespace,
     NewLine,
     Identifier,
-    Literal,
+
+    IntegerLiteral,
+    StringLiteral { is_closed: bool },
 
     Semicolon,
     Comma,
@@ -35,8 +40,7 @@ enum TokenKind {
     Unknown,
 }
 
-#[derive(Clone)]
-struct Token<'a> {
+pub struct Token<'a> {
     text: &'a str,
     kind: TokenKind,
 }
@@ -49,8 +53,11 @@ impl Token<'_> {
 fn is_vertical_whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t')
 }
+fn is_valid_identifier_start(c: char) -> bool {
+    matches!( c, 'a'..='z' | 'A'..='Z' | '_' )
+}
 
-struct Cursor<'a> {
+pub struct Cursor<'a> {
     chars: Chars<'a>,
 }
 
@@ -109,32 +116,29 @@ impl<'a> Cursor<'a> {
                 '*' if self.first() == '/' => {
                     self.bump();
                     if depth == 1 {
-                        return BlockComment;
+                        return BlockComment { is_closed: true };
                     }
                     depth -= 1;
                 }
                 _ => (),
             }
         }
-        Eof
+        BlockComment { is_closed: false }
+    }
+    fn identifier(&mut self) -> TokenKind {
+        self.eat_while(|c| matches!(c, 'a'..='z'|'A'..='Z'|'_'));
+        Identifier
     }
 
-    fn numeric_literal(&mut self) -> bool {
-        while let Some(c) = self.bump() {
-            match c {
-                '0'..='9' | '_' => {
-                    self.bump();
-                }
-                _ => (),
-            }
-        }
-        false
+    fn numeric_literal(&mut self) -> TokenKind {
+        self.eat_while(|c| matches!(c, '0'..='9' | '_'));
+        IntegerLiteral
     }
-    fn string_literal(&mut self) -> bool {
+    fn string_literal(&mut self) -> TokenKind {
         while let Some(c) = self.bump() {
             match c {
                 '"' => {
-                    return true;
+                    return StringLiteral { is_closed: true };
                 }
                 '\\' if self.first() == '\\' || self.first() == '"' => {
                     self.bump();
@@ -142,8 +146,9 @@ impl<'a> Cursor<'a> {
                 _ => (),
             }
         }
-        false
+        StringLiteral { is_closed: false }
     }
+
     fn advance_token(&mut self) -> Token<'a> {
         let remaining_str = self.chars.as_str();
         let first_char = match self.bump() {
@@ -160,7 +165,9 @@ impl<'a> Cursor<'a> {
                 self.eat_while(is_vertical_whitespace);
                 VerticalWhitespace
             }
-            c @ '0'..='9' => todo!("{c}"),
+
+            c if is_valid_identifier_start(c) => self.identifier(),
+            c @ '0'..='9' => self.numeric_literal(),
 
             '\n' => NewLine,
             ';' => Semicolon,
@@ -184,7 +191,7 @@ impl<'a> Cursor<'a> {
                 _ => Minus,
             },
 
-            '"' => todo!(),
+            '"' => self.string_literal(),
 
             EOF_CHAR => Eof,
 
@@ -195,7 +202,7 @@ impl<'a> Cursor<'a> {
     }
 }
 
-fn tokenize(text: &str) -> impl Iterator<Item = Token> {
+pub fn tokenize(text: &str) -> impl Iterator<Item = Token> {
     let mut cursor = Cursor::new(text);
     std::iter::from_fn(move || {
         let token = cursor.advance_token();
