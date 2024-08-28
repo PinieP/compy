@@ -1,0 +1,29 @@
+# Grammar
+
+List[T] ->  
+         |  T
+         |  T List[T]
+Module  -> List[Decl `;`] Eof
+Decl    ->  Func
+         |  Var
+Func    ->  `fnc` `(` Params `)` Block
+Params  ->
+         |  Ident
+         |  Ident `,`
+         |  Ident `,` Params
+Block   ->  `{` List[Stmt `;`] `}`
+Stmt    ->  Expr
+         |  Decl
+VarDecl ->  Let
+         |  Var
+Let     -> Ident `=` Expr
+Var     -> Ident `=` Expr
+Expr    ->  Binop
+         |  Unop
+         | `(` Expr `)`
+Binop   -> Expr `+` Expr    // prec 0
+         | Expr `-` Expr    // prec 0
+         | Expr `*` Expr    // prec 1
+         | Expr `/` Expr    // prec 1
+Unop    -> `+` Expr         // prec 2
+        -> `-` Expr         // prec 2
