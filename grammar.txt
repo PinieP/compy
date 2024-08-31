@@ -12,15 +12,17 @@ Params  ->
          |  Ident `,`
          |  Ident `,` Params
 Block   ->  `{` List[Stmt `;`] `}`
-Stmt    ->  Expr
+Stmt    ->  ExprStmt
          |  Decl
+ExprStmt -> Expr `;`
 VarDecl ->  Let
          |  Var
-Let     -> Ident `=` Expr
-Var     -> Ident `=` Expr
+Let     ->  Ident `=` Expr
+Var     ->  Ident `=` Expr
 Expr    ->  Binop
          |  Unop
-         | `(` Expr `)`
+         |  `(` Expr `)`
+         |  Literal
 Binop   -> Expr `+` Expr    // prec 0
          | Expr `-` Expr    // prec 0
          | Expr `*` Expr    // prec 1

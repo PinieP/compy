@@ -27,8 +27,6 @@ impl FileId {
 #[derive(Clone, Debug)]
 pub struct Span {
     pub file_id: FileId,
-    pub len: u16,
-    pub offset: u32,
-    #[cfg(debug_assertions)]
-    pub debug_text: String,
+    pub begin: u64,
+    pub end: u64,
 }

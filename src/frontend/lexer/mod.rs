@@ -4,13 +4,13 @@ use std::str::Chars;
 #[cfg(test)]
 mod tests;
 
-#[derive(PartialEq, Debug, Clone)]
-pub enum LiteralKind {
-    Integer,
-    String,
-}
+use DelimiterKind::*;
+use KeywordKind::*;
+use LiteralKind::*;
+use OperatorKind::*;
+use TokenKind::*;
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum TokenKind {
     NewLine,
     Identifier,
@@ -20,12 +20,27 @@ pub enum TokenKind {
     Colon,
     Comma,
     Dot,
-    OpenParen,
-    CloseParen,
-    OpenBrace,
-    CloseBrace,
-    OpenBracket,
-    CloseBracket,
+    OpenDelimiter(DelimiterKind),
+    CloseDelimiter(DelimiterKind),
+    Operator(OperatorKind),
+    Eof,
+}
+impl TokenKind {
+    fn identifier_to_keyword(self, text: &str) -> TokenKind {
+        match self {
+            Identifier => Keyword(match text {
+                "fnc" => Fnc,
+                "let" => Let,
+                "var" => Var,
+                _ => return self,
+            }),
+            _ => self,
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum OperatorKind {
     Equal,
     LessThan,
     GreaterThan,
@@ -35,25 +50,23 @@ pub enum TokenKind {
     Or,
     Star,
     Slash,
-    Eof,
-}
-impl TokenKind {
-    fn identifier_to_keyword(self, text: &str) -> TokenKind {
-        match self {
-            Identifier => Keyword(match text {
-                "fnc" => KeywordKind::Function,
-                "let" => KeywordKind::Let,
-                "var" => KeywordKind::Var,
-                _ => return self,
-            }),
-            _ => self,
-        }
-    }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum LiteralKind {
+    Integer,
+    String,
+}
+
+#[derive(Clone, Debug, PartialEq, Copy)]
+pub enum DelimiterKind {
+    Paren,
+    Brace,
+    Bracket,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum KeywordKind {
-    Function,
+    Fnc,
     Let,
     Var,
 }
@@ -73,7 +86,7 @@ fn is_valid_identifier_start(c: char) -> bool {
 pub struct Cursor<'a> {
     chars: Chars<'a>,
     file_id: Option<FileId>,
-    start_len: u32,
+    start_len: u64,
 }
 
 const EOF_CHAR: char = '\0';
@@ -88,20 +101,19 @@ pub enum LexErrKind {
     OpenBlockComment,
 }
 
-use TokenKind::*;
 impl<'a> Cursor<'a> {
     fn from_file(file: &'a SourceFile, file_id: FileId) -> Self {
         Cursor {
             chars: file.text.chars(),
             file_id: Some(file_id),
-            start_len: file.text.len() as u32,
+            start_len: file.text.len() as u64,
         }
     }
     fn from_str(text: &'a str) -> Self {
         Cursor {
             chars: text.chars(),
             file_id: None,
-            start_len: text.len() as u32,
+            start_len: text.len() as u64,
         }
     }
     fn first(&self) -> char {
@@ -209,7 +221,7 @@ impl<'a> Cursor<'a> {
                         preceeded_by_whitespace = true;
                         continue;
                     }
-                    _ => Slash,
+                    _ => Operator(Slash),
                 },
                 c if c.is_whitespace() => {
                     self.eat_whitespace();
@@ -227,20 +239,20 @@ impl<'a> Cursor<'a> {
                 ':' => Colon,
                 ',' => Comma,
                 '.' => Dot,
-                '(' => OpenParen,
-                ')' => CloseParen,
-                '{' => OpenBrace,
-                '}' => CloseBrace,
-                '[' => OpenBracket,
-                ']' => CloseBracket,
-                '=' => Equal,
-                '<' => LessThan,
-                '>' => GreaterThan,
-                '+' => Plus,
-                '&' => And,
-                '|' => Or,
-                '*' => Star,
-                '-' => Minus,
+                '(' => OpenDelimiter(Paren),
+                ')' => CloseDelimiter(Paren),
+                '{' => OpenDelimiter(Brace),
+                '}' => CloseDelimiter(Brace),
+                '[' => OpenDelimiter(Bracket),
+                ']' => CloseDelimiter(Bracket),
+                '=' => Operator(Equal),
+                '<' => Operator(LessThan),
+                '>' => Operator(GreaterThan),
+                '+' => Operator(Plus),
+                '&' => Operator(And),
+                '|' => Operator(Or),
+                '*' => Operator(Star),
+                '-' => Operator(Minus),
 
                 '"' => {
                     if self.string_literal() {
@@ -253,18 +265,16 @@ impl<'a> Cursor<'a> {
                 _ => break Err(LexErrKind::UnknownToken),
             });
         };
-        let len = remaining_str.len() - self.chars.as_str().len();
-        let offset = self.start_len - remaining_str.len() as u32;
-        let text = &remaining_str[..len];
+        let begin = self.start_len - remaining_str.len() as u64;
+        let end = self.start_len - self.chars.as_str().len() as u64;
+        let text = &remaining_str[..(end - begin) as usize];
 
         let token_kind = token_kind.map(|kind| kind.identifier_to_keyword(text));
 
         let span = Span {
             file_id: self.file_id(),
-            len: len as u16,
-            offset,
-            #[cfg(debug_assertions)]
-            debug_text: text.to_string(),
+            begin,
+            end,
         };
         token_kind
             .map_err(|kind| LexErr {

@@ -3,24 +3,20 @@ use crate::compile_target::Span;
 #[derive(Debug)]
 pub struct Module {
     pub declarations: Vec<Declaration>,
-    pub span: Option<Span>,
-}
-#[derive(Debug)]
-pub struct Declaration {
-    pub kind: DeclarationKind,
-    pub identifier: Identifier,
     pub span: Span,
 }
 #[derive(Debug)]
-pub enum DeclarationKind {
+pub enum Declaration {
     Function(Box<Function>),
     Variable(Box<VariableDeclaration>),
 }
 
 #[derive(Debug)]
 pub struct VariableDeclaration {
-    kind: VariableDeclarationKind,
-    expression: Box<Expression>,
+    pub identifier: Identifier,
+    pub kind: VariableDeclarationKind,
+    pub expression: Box<Expression>,
+    pub span: Span,
 }
 #[derive(Debug)]
 pub enum VariableDeclarationKind {
@@ -29,21 +25,17 @@ pub enum VariableDeclarationKind {
 }
 #[derive(Debug)]
 pub struct Function {
+    pub identifier: Identifier,
     pub args: Vec<Identifier>,
     pub block: Box<Block>,
 }
 #[derive(Debug)]
 pub struct Block {
-    statements: Vec<Statement>,
-    span: Span,
-}
-#[derive(Debug)]
-pub struct Statement {
-    pub kind: StatementKind,
+    pub statements: Vec<Statement>,
     pub span: Span,
 }
 #[derive(Debug)]
-pub enum StatementKind {
+pub enum Statement {
     Expression(Box<Expression>),
     Declaration(Box<Declaration>),
     Block(Box<Block>),
@@ -78,7 +70,7 @@ pub enum BinopKind {
 #[derive(Debug)]
 pub struct Unop {
     pub kind: UnopKind,
-    pub expr: Box<Expression>,
+    pub expr: Expression,
 }
 #[derive(Debug)]
 pub enum UnopKind {
@@ -87,12 +79,13 @@ pub enum UnopKind {
 }
 #[derive(Debug)]
 pub struct Literal {
-    kind: LiteralKind,
+    pub kind: LiteralKind,
 }
+
 #[derive(Debug)]
 pub enum LiteralKind {
-    Integer { value: u128 },
-    String { value: String },
+    Integer,
+    String,
 }
 
 #[derive(Debug)]
