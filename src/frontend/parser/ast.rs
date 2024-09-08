@@ -43,8 +43,8 @@ pub enum Statement {
 
 #[derive(Debug)]
 pub struct Expression {
-    span: Span,
-    kind: ExpressionKind,
+    pub span: Span,
+    pub kind: ExpressionKind,
 }
 #[derive(Debug)]
 pub enum ExpressionKind {
@@ -56,15 +56,41 @@ pub enum ExpressionKind {
 #[derive(Debug)]
 pub struct Binop {
     pub kind: BinopKind,
-    pub lhs: Box<Expression>,
-    pub rhs: Box<Expression>,
+    pub lhs: Expression,
+    pub rhs: Expression,
 }
 #[derive(Debug)]
 pub enum BinopKind {
+    Assign,
+
+    Equal,
+    NotEqual,
+    LessThan,
+    LessEqual,
+    GreaterThan,
+    GreaterEqual,
+
+    LogicalAnd,
+    BitwiseAnd,
+    InplaceBitwiseAnd,
+
+    LogicalOr,
+    BitwiseOr,
+    InplaceBitwiseOr,
+
+    BitwiseXor,
+    InplaceBitwiseXor,
+
     Plus,
+    InplacePlus,
     Minus,
-    Star,
-    Slash,
+    InplaceMinus,
+    Multiply,
+    InplaceMultiply,
+    Divide,
+    InplaceDivide,
+    Modulus,
+    InplaceModulus,
 }
 
 #[derive(Debug)]

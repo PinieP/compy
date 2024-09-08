@@ -1,12 +1,8 @@
-use crate::compile_target::{FileId, SourceFile, Span};
+use crate::compile_target::{FileId, FilePos, SourceFile, Span};
 use std::str::Chars;
-
-#[cfg(test)]
-mod tests;
 
 use DelimiterKind::*;
 use KeywordKind::*;
-use LiteralKind::*;
 use OperatorKind::*;
 use TokenKind::*;
 
@@ -19,7 +15,6 @@ pub enum TokenKind {
     Semicolon,
     Colon,
     Comma,
-    Dot,
     OpenDelimiter(DelimiterKind),
     CloseDelimiter(DelimiterKind),
     Operator(OperatorKind),
@@ -28,7 +23,7 @@ pub enum TokenKind {
 impl TokenKind {
     fn identifier_to_keyword(self, text: &str) -> TokenKind {
         match self {
-            Identifier => Keyword(match text {
+            Identifier => Keyword(match dbg!(text) {
                 "fnc" => Fnc,
                 "let" => Let,
                 "var" => Var,
@@ -41,15 +36,39 @@ impl TokenKind {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum OperatorKind {
+    Assign,
+
     Equal,
+    NotEqual,
     LessThan,
+    LessEqual,
     GreaterThan,
+    GreaterEqual,
+
+    LogicalAnd,
+    BitwiseAnd,
+    InplaceBitwiseAnd,
+
+    LogicalOr,
+    BitwiseOr,
+    InplaceBitwiseOr,
+
+    BitwiseXor,
+    InplaceBitwiseXor,
+
+    Dot,
     Plus,
+    InplacePlus,
     Minus,
-    And,
-    Or,
-    Star,
-    Slash,
+    InplaceMinus,
+    Multiply,
+    InplaceMultiply,
+    Divide,
+    InplaceDivide,
+    Modulus,
+    InplaceModulus,
+
+    Not,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -74,7 +93,6 @@ pub enum KeywordKind {
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
-    pub preceeded_by_whitespace: bool,
     pub span: Span,
 }
 
@@ -85,16 +103,18 @@ fn is_valid_identifier_start(c: char) -> bool {
 #[derive(Clone)]
 pub struct Cursor<'a> {
     chars: Chars<'a>,
-    file_id: Option<FileId>,
+    file_id: FileId,
     start_len: u64,
 }
 
 const EOF_CHAR: char = '\0';
 
+#[derive(Clone, Debug)]
 pub struct LexErr {
     pub span: Span,
-    kind: LexErrKind,
+    pub kind: LexErrKind,
 }
+#[derive(Clone, Debug)]
 pub enum LexErrKind {
     UnknownToken,
     OpenQuotes,
@@ -102,17 +122,17 @@ pub enum LexErrKind {
 }
 
 impl<'a> Cursor<'a> {
-    fn from_file(file: &'a SourceFile, file_id: FileId) -> Self {
+    pub fn from_file(file: &'a SourceFile, file_id: FileId) -> Self {
         Cursor {
             chars: file.text.chars(),
-            file_id: Some(file_id),
+            file_id: file_id,
             start_len: file.text.len() as u64,
         }
     }
-    fn from_str(text: &'a str) -> Self {
+    pub fn from_str(text: &'a str) -> Self {
         Cursor {
             chars: text.chars(),
-            file_id: None,
+            file_id: FileId::default(),
             start_len: text.len() as u64,
         }
     }
@@ -184,7 +204,7 @@ impl<'a> Cursor<'a> {
     }
 
     fn file_id(&self) -> FileId {
-        self.file_id.unwrap_or(FileId::from_index(0))
+        self.file_id
     }
     fn string_literal(&mut self) -> bool {
         while let Some(c) = self.bump() {
@@ -202,30 +222,31 @@ impl<'a> Cursor<'a> {
     }
 
     fn advance_token(&mut self) -> Result<Token, LexErr> {
-        let remaining_str = self.chars.as_str();
-        let first_char = self.bump().unwrap_or(EOF_CHAR);
+        let mut remaining_str;
 
-        let mut preceeded_by_whitespace = false;
         let token_kind: Result<TokenKind, LexErrKind> = loop {
+            remaining_str = self.chars.as_str();
+            let first_char = self.bump().unwrap_or(EOF_CHAR);
             break Ok(match first_char {
                 '/' => match self.first() {
                     '/' => {
                         self.eat_line_comment();
-                        preceeded_by_whitespace = true;
                         continue;
                     }
                     '*' => {
                         if !self.eat_block_comment() {
                             break Err(LexErrKind::OpenBlockComment);
                         }
-                        preceeded_by_whitespace = true;
                         continue;
                     }
-                    _ => Operator(Slash),
+                    '=' => {
+                        self.bump();
+                        Operator(InplaceDivide)
+                    }
+                    _ => Operator(Divide),
                 },
                 c if c.is_whitespace() => {
                     self.eat_whitespace();
-                    preceeded_by_whitespace = true;
                     continue;
                 }
 
@@ -238,21 +259,99 @@ impl<'a> Cursor<'a> {
                 ';' => Semicolon,
                 ':' => Colon,
                 ',' => Comma,
-                '.' => Dot,
                 '(' => OpenDelimiter(Paren),
                 ')' => CloseDelimiter(Paren),
                 '{' => OpenDelimiter(Brace),
                 '}' => CloseDelimiter(Brace),
                 '[' => OpenDelimiter(Bracket),
                 ']' => CloseDelimiter(Bracket),
-                '=' => Operator(Equal),
-                '<' => Operator(LessThan),
-                '>' => Operator(GreaterThan),
-                '+' => Operator(Plus),
-                '&' => Operator(And),
-                '|' => Operator(Or),
-                '*' => Operator(Star),
-                '-' => Operator(Minus),
+
+                '.' => Operator(Dot),
+                '!' => match self.first() {
+                    '=' => {
+                        self.bump();
+                        Operator(NotEqual)
+                    }
+                    _ => Operator(Not),
+                },
+                '=' => match self.first() {
+                    '=' => {
+                        self.bump();
+                        Operator(Equal)
+                    }
+                    _ => Operator(Assign),
+                },
+                '<' => match self.first() {
+                    '=' => {
+                        self.bump();
+                        Operator(LessEqual)
+                    }
+                    _ => Operator(LessThan),
+                },
+                '>' => match self.first() {
+                    '=' => {
+                        self.bump();
+                        Operator(GreaterEqual)
+                    }
+                    _ => Operator(GreaterThan),
+                },
+                '+' => match self.first() {
+                    '=' => {
+                        self.bump();
+                        Operator(InplacePlus)
+                    }
+                    _ => Operator(Plus),
+                },
+                '-' => match self.first() {
+                    '=' => {
+                        self.bump();
+                        Operator(InplaceMinus)
+                    }
+                    _ => Operator(Minus),
+                },
+                '*' => match self.first() {
+                    '=' => {
+                        self.bump();
+                        Operator(InplaceMultiply)
+                    }
+                    _ => Operator(Multiply),
+                },
+                '%' => match self.first() {
+                    '=' => {
+                        self.bump();
+                        Operator(InplaceModulus)
+                    }
+                    _ => Operator(Modulus),
+                },
+                '&' => match self.first() {
+                    '&' => {
+                        self.bump();
+                        Operator(LogicalAnd)
+                    }
+                    '=' => {
+                        self.bump();
+                        Operator(InplaceBitwiseAnd)
+                    }
+                    _ => Operator(BitwiseAnd),
+                },
+                '|' => match self.first() {
+                    '|' => {
+                        self.bump();
+                        Operator(LogicalOr)
+                    }
+                    '=' => {
+                        self.bump();
+                        Operator(InplaceBitwiseOr)
+                    }
+                    _ => Operator(BitwiseOr),
+                },
+                '^' => match self.first() {
+                    '=' => {
+                        self.bump();
+                        Operator(InplaceBitwiseXor)
+                    }
+                    _ => Operator(BitwiseXor),
+                },
 
                 '"' => {
                     if self.string_literal() {
@@ -265,14 +364,18 @@ impl<'a> Cursor<'a> {
                 _ => break Err(LexErrKind::UnknownToken),
             });
         };
-        let begin = self.start_len - remaining_str.len() as u64;
-        let end = self.start_len - self.chars.as_str().len() as u64;
-        let text = &remaining_str[..(end - begin) as usize];
+        let begin = FilePos {
+            index: self.start_len - remaining_str.len() as u64,
+        };
+        let end = FilePos {
+            index: self.start_len - self.chars.as_str().len() as u64,
+        };
+        let text = &remaining_str[..(end.index - begin.index) as usize];
 
         let token_kind = token_kind.map(|kind| kind.identifier_to_keyword(text));
 
         let span = Span {
-            file_id: self.file_id(),
+            file_id: self.file_id,
             begin,
             end,
         };
@@ -281,11 +384,7 @@ impl<'a> Cursor<'a> {
                 span: span.clone(),
                 kind,
             })
-            .map(|kind| Token {
-                kind,
-                preceeded_by_whitespace,
-                span,
-            })
+            .map(|kind| Token { kind, span })
     }
 
     pub fn into_vec(mut self) -> (Vec<Token>, Vec<LexErr>) {
@@ -295,11 +394,14 @@ impl<'a> Cursor<'a> {
             match self.advance_token() {
                 Ok(token) => {
                     if token.kind == Eof {
+                        oks.push(token);
                         break;
                     }
-                    oks.push(token)
+                    oks.push(token);
                 }
-                Err(err) => errs.push(err),
+                Err(err) => {
+                    errs.push(err);
+                }
             }
         }
         (oks, errs)
@@ -314,5 +416,26 @@ impl Iterator for Cursor<'_> {
             Ok(token) if token.kind == Eof => None,
             r => Some(r),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn lex() {
+        let text = "identifier,/*Ignore me*/ 432984\"string\"";
+        let mut cursor = Cursor::from_str(text);
+        println!("{:?}", cursor.clone().into_vec());
+        assert_eq!(cursor.next().unwrap().unwrap().kind, Identifier);
+        assert_eq!(cursor.next().unwrap().unwrap().kind, Comma);
+        assert_eq!(
+            cursor.next().unwrap().unwrap().kind,
+            Literal(LiteralKind::Integer)
+        );
+        assert_eq!(
+            cursor.next().unwrap().unwrap().kind,
+            Literal(LiteralKind::String)
+        );
     }
 }
