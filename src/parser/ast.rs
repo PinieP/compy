@@ -1,4 +1,4 @@
-use crate::compile_target::Span;
+use crate::source::Span;
 
 #[derive(Debug)]
 pub struct Module {
@@ -8,6 +8,7 @@ pub struct Module {
 #[derive(Debug)]
 pub enum Declaration {
     Function(Box<Function>),
+    Type,
     Variable(Box<VariableDeclaration>),
 }
 
@@ -27,7 +28,13 @@ pub enum VariableDeclarationKind {
 pub struct Function {
     pub identifier: Identifier,
     pub args: Vec<Identifier>,
-    pub block: Box<Block>,
+    pub body: FunctionBody,
+}
+
+#[derive(Debug)]
+pub enum FunctionBody {
+    Block(Box<Block>),
+    Expression(Box<Expression>),
 }
 #[derive(Debug)]
 pub struct Block {
@@ -72,25 +79,25 @@ pub enum BinopKind {
 
     LogicalAnd,
     BitwiseAnd,
-    InplaceBitwiseAnd,
+    CompoundAssignBitwiseAnd,
 
     LogicalOr,
     BitwiseOr,
-    InplaceBitwiseOr,
+    CompoundAssignBitwiseOr,
 
     BitwiseXor,
-    InplaceBitwiseXor,
+    CompoundAssignBitwiseXor,
 
     Plus,
-    InplacePlus,
+    CompoundAssignPlus,
     Minus,
-    InplaceMinus,
+    CompoundAssignMinus,
     Multiply,
-    InplaceMultiply,
+    CompoundAssignMultiply,
     Divide,
-    InplaceDivide,
+    CompoundAssignDivide,
     Modulus,
-    InplaceModulus,
+    CompoundAssignModulus,
 }
 
 #[derive(Debug)]

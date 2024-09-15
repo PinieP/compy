@@ -1,4 +1,5 @@
-use crate::compile_target::{FileId, FilePos, SourceFile, Span};
+use crate::source::{BytePos, FileId, SourceFile, Span};
+use crate::util::IntegerWrapper;
 use std::str::Chars;
 
 use DelimiterKind::*;
@@ -47,26 +48,26 @@ pub enum OperatorKind {
 
     LogicalAnd,
     BitwiseAnd,
-    InplaceBitwiseAnd,
+    CompoundAssignBitwiseAnd,
 
     LogicalOr,
     BitwiseOr,
-    InplaceBitwiseOr,
+    CompoundAssignBitwiseOr,
 
     BitwiseXor,
-    InplaceBitwiseXor,
+    CompoundAssignBitwiseXor,
 
     Dot,
     Plus,
-    InplacePlus,
+    CompoundAssignPlus,
     Minus,
-    InplaceMinus,
+    CompoundAssignMinus,
     Multiply,
-    InplaceMultiply,
+    CompoundAssignMultiply,
     Divide,
-    InplaceDivide,
+    CompoundAssignDivide,
     Modulus,
-    InplaceModulus,
+    CompoundAssignModulus,
 
     Not,
 }
@@ -104,7 +105,7 @@ fn is_valid_identifier_start(c: char) -> bool {
 pub struct Cursor<'a> {
     chars: Chars<'a>,
     file_id: FileId,
-    start_len: u64,
+    start_len: usize,
 }
 
 const EOF_CHAR: char = '\0';
@@ -125,30 +126,19 @@ impl<'a> Cursor<'a> {
     pub fn from_file(file: &'a SourceFile, file_id: FileId) -> Self {
         Cursor {
             chars: file.text.chars(),
-            file_id: file_id,
-            start_len: file.text.len() as u64,
+            file_id,
+            start_len: file.text.len(),
         }
     }
     pub fn from_str(text: &'a str) -> Self {
         Cursor {
             chars: text.chars(),
             file_id: FileId::default(),
-            start_len: text.len() as u64,
+            start_len: text.len(),
         }
     }
     fn first(&self) -> char {
         self.chars.clone().next().unwrap_or(EOF_CHAR)
-    }
-    fn second(&self) -> char {
-        let mut iter = self.chars.clone();
-        iter.next();
-        iter.next().unwrap_or(EOF_CHAR)
-    }
-    fn third(&self) -> char {
-        let mut iter = self.chars.clone();
-        iter.next();
-        iter.next();
-        iter.next().unwrap_or(EOF_CHAR)
     }
 
     fn bump(&mut self) -> Option<char> {
@@ -241,7 +231,7 @@ impl<'a> Cursor<'a> {
                     }
                     '=' => {
                         self.bump();
-                        Operator(InplaceDivide)
+                        Operator(CompoundAssignDivide)
                     }
                     _ => Operator(Divide),
                 },
@@ -298,28 +288,28 @@ impl<'a> Cursor<'a> {
                 '+' => match self.first() {
                     '=' => {
                         self.bump();
-                        Operator(InplacePlus)
+                        Operator(CompoundAssignPlus)
                     }
                     _ => Operator(Plus),
                 },
                 '-' => match self.first() {
                     '=' => {
                         self.bump();
-                        Operator(InplaceMinus)
+                        Operator(CompoundAssignMinus)
                     }
                     _ => Operator(Minus),
                 },
                 '*' => match self.first() {
                     '=' => {
                         self.bump();
-                        Operator(InplaceMultiply)
+                        Operator(CompoundAssignMultiply)
                     }
                     _ => Operator(Multiply),
                 },
                 '%' => match self.first() {
                     '=' => {
                         self.bump();
-                        Operator(InplaceModulus)
+                        Operator(CompoundAssignModulus)
                     }
                     _ => Operator(Modulus),
                 },
@@ -330,7 +320,7 @@ impl<'a> Cursor<'a> {
                     }
                     '=' => {
                         self.bump();
-                        Operator(InplaceBitwiseAnd)
+                        Operator(CompoundAssignBitwiseAnd)
                     }
                     _ => Operator(BitwiseAnd),
                 },
@@ -341,14 +331,14 @@ impl<'a> Cursor<'a> {
                     }
                     '=' => {
                         self.bump();
-                        Operator(InplaceBitwiseOr)
+                        Operator(CompoundAssignBitwiseOr)
                     }
                     _ => Operator(BitwiseOr),
                 },
                 '^' => match self.first() {
                     '=' => {
                         self.bump();
-                        Operator(InplaceBitwiseXor)
+                        Operator(CompoundAssignBitwiseXor)
                     }
                     _ => Operator(BitwiseXor),
                 },
@@ -364,21 +354,13 @@ impl<'a> Cursor<'a> {
                 _ => break Err(LexErrKind::UnknownToken),
             });
         };
-        let begin = FilePos {
-            index: self.start_len - remaining_str.len() as u64,
-        };
-        let end = FilePos {
-            index: self.start_len - self.chars.as_str().len() as u64,
-        };
-        let text = &remaining_str[..(end.index - begin.index) as usize];
+        let begin = BytePos::from_usize(self.start_len - remaining_str.len());
+        let end = BytePos::from_usize(self.start_len - self.chars.as_str().len());
+        let text = &remaining_str[..(end.index() - begin.index()) as usize];
 
         let token_kind = token_kind.map(|kind| kind.identifier_to_keyword(text));
 
-        let span = Span {
-            file_id: self.file_id,
-            begin,
-            end,
-        };
+        let span = Span { begin, end };
         token_kind
             .map_err(|kind| LexErr {
                 span: span.clone(),

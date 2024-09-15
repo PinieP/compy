@@ -1,6 +1,7 @@
-use crate::compile_target::{CompileTarget, FileId, FilePos, Span};
-use crate::frontend::lexer;
-use lexer::{DelimiterKind, KeywordKind, OperatorKind, Token, TokenKind};
+use super::lexer::{self, Cursor, DelimiterKind, KeywordKind, OperatorKind, Token, TokenKind};
+use crate::session::Session;
+use crate::source::{BytePos, FileId, Span};
+use crate::util::IntegerWrapper;
 
 mod ast;
 use ast::*;
@@ -9,8 +10,6 @@ use KeywordKind::*;
 use OperatorKind::*;
 use ParseErrKind::*;
 use TokenKind::*;
-
-use super::lexer::Cursor;
 
 #[derive(Debug, Clone)]
 pub struct ParseErr {
@@ -66,7 +65,7 @@ pub struct ParsePositon {
 pub struct Parser<'a> {
     tokens: &'a [Token],
     head: ParsePositon,
-    file_tail: FilePos,
+    tail_pos: BytePos,
 }
 
 impl<'a> Parser<'a> {
@@ -74,24 +73,23 @@ impl<'a> Parser<'a> {
         Parser {
             tokens,
             head: ParsePositon { pos: 0 },
-            file_tail: FilePos { index: 0 },
+            tail_pos: BytePos::from_index(0),
         }
     }
     fn bump(&mut self) -> &Token {
-        self.file_tail = self.tokens[self.head.pos].span.end;
+        self.tail_pos = self.tokens[self.head.pos].span.end;
         let old_head = self.head.pos;
         self.head.pos += 1;
         &self.tokens[old_head]
     }
-    fn first(&self) -> &Token {
+    fn peek(&self) -> &Token {
         &self.tokens[dbg!(self.head.pos.min(self.tokens.len() - 1))]
     }
 
     fn span_from(&self, span: &Span) -> Span {
         Span {
-            file_id: span.file_id,
             begin: span.begin,
-            end: self.file_tail,
+            end: self.tail_pos,
         }
     }
 }
@@ -115,9 +113,9 @@ impl Parser<'_> {
     // parse
     fn parse_module(&mut self) -> ParseResult<Module> {
         let mut decls = Vec::new();
-        let begin_span = self.first().span.clone();
+        let begin_span = self.peek().span.clone();
         loop {
-            let token = self.first();
+            let token = self.peek();
             match dbg!(token.kind) {
                 Eof => {
                     break Ok(Module {
@@ -131,7 +129,7 @@ impl Parser<'_> {
     }
 
     fn parse_declaration(&mut self) -> ParseResult<Declaration> {
-        let token = self.first();
+        let token = self.peek();
         match token.kind {
             Keyword(kind) => Ok(match kind {
                 Fnc => Declaration::Function(Box::new(self.parse_function()?)),
@@ -151,7 +149,7 @@ impl Parser<'_> {
         keyword_kind: KeywordKind,
         var_decl_kind: VariableDeclarationKind,
     ) -> ParseResult<VariableDeclaration> {
-        let begin_span = self.first().span.clone();
+        let begin_span = self.peek().span.clone();
         self.expect_token(Keyword(keyword_kind))?;
         let identifier = self.parse_identifier()?;
         self.expect_token(Operator(Assign))?;
@@ -177,19 +175,22 @@ impl Parser<'_> {
         Ok(Function {
             identifier: self.parse_identifier()?,
             args: self.parse_sequence(Paren, Some(Comma), |this| this.parse_identifier())?,
-            block: Box::new(self.parse_block()?),
+            body: match self.peek().kind {
+                OpenDelimiter(Brace) => FunctionBody::Block(Box::new(self.parse_block()?)),
+                _ => FunctionBody::Expression(Box::new(self.parse_expression()?)),
+            },
         })
     }
 
     fn parse_block(&mut self) -> ParseResult<Block> {
-        let begin_span = self.first().span.clone();
+        let begin_span = self.peek().span.clone();
         Ok(Block {
             statements: self.parse_sequence(Brace, None, |this| this.parse_statement())?,
             span: self.span_from(&begin_span),
         })
     }
     fn parse_statement(&mut self) -> ParseResult<Statement> {
-        let token = self.first();
+        let token = self.peek();
         Ok(match token.kind {
             Keyword(_) => Statement::Declaration(Box::new(self.parse_declaration()?)),
             OpenDelimiter(Brace) => Statement::Block(Box::new(self.parse_block()?)),
@@ -198,7 +199,7 @@ impl Parser<'_> {
     }
 
     fn parse_prefix_unop(&mut self, kind: OperatorKind) -> ParseResult<ExpressionKind> {
-        debug_assert!(matches!(self.first().kind, Operator(op_kind) if op_kind.is_valid_unary()));
+        debug_assert!(matches!(self.peek().kind, Operator(op_kind) if op_kind.is_valid_unary()));
         self.bump();
         let unop_kind = match kind {
             Plus => UnopKind::Plus,
@@ -213,13 +214,13 @@ impl Parser<'_> {
     }
 
     fn parse_atom(&mut self) -> ParseResult<Expression> {
-        let token = self.first().clone();
+        let token = self.peek().clone();
         let kind = match token.kind {
             OpenDelimiter(kind) => match kind {
                 Paren => {
                     self.bump();
                     let expr = self.parse_expression()?;
-                    if self.first().kind == OpenDelimiter(Paren) {
+                    if self.peek().kind == OpenDelimiter(Paren) {
                         expr.kind
                     } else {
                         return Err(ParseErr::expected_token(CloseDelimiter(Paren), &token));
@@ -253,17 +254,17 @@ impl Parser<'_> {
 
     fn parse_expression(&mut self) -> ParseResult<Expression> {
         let atom = self.parse_atom()?;
-        match self.first().kind {
+        match self.peek().kind {
             Operator(op_kind) => self.parse_binop(atom, op_kind),
             _ => Ok(atom),
         }
     }
 
     fn parse_binop(&mut self, lhs: Expression, op_kind: OperatorKind) -> ParseResult<Expression> {
-        debug_assert!(matches!(self.first().kind, Operator(_)));
+        debug_assert!(matches!(self.peek().kind, Operator(_)));
         self.bump();
         let immediate_rhs = self.parse_atom()?;
-        let rhs = match self.first().kind {
+        let rhs = match self.peek().kind {
             Operator(next_op_kind)
                 if next_op_kind.binop_precedence() < op_kind.binop_precedence() =>
             {
@@ -325,7 +326,7 @@ impl Parser<'_> {
         let mut seq = Vec::new();
         let mut previous_was_sep = true;
         loop {
-            let token = self.first();
+            let token = self.peek();
             match token.kind {
                 CloseDelimiter(delim_k) if delim_k == kind => {
                     self.bump();
@@ -384,37 +385,37 @@ impl BinopKind {
             GreaterEqual => BinopKind::GreaterEqual,
             LogicalAnd => BinopKind::LogicalAnd,
             BitwiseAnd => BinopKind::BitwiseAnd,
-            InplaceBitwiseAnd => BinopKind::InplaceBitwiseAnd,
+            CompoundAssignBitwiseAnd => BinopKind::CompoundAssignBitwiseAnd,
             LogicalOr => BinopKind::LogicalOr,
             BitwiseOr => BinopKind::BitwiseOr,
-            InplaceBitwiseOr => BinopKind::InplaceBitwiseOr,
+            CompoundAssignBitwiseOr => BinopKind::CompoundAssignBitwiseOr,
             BitwiseXor => BinopKind::BitwiseXor,
-            InplaceBitwiseXor => BinopKind::InplaceBitwiseXor,
+            CompoundAssignBitwiseXor => BinopKind::CompoundAssignBitwiseXor,
             Plus => BinopKind::Plus,
-            InplacePlus => BinopKind::InplacePlus,
+            CompoundAssignPlus => BinopKind::CompoundAssignPlus,
             Minus => BinopKind::Minus,
-            InplaceMinus => BinopKind::InplaceMinus,
+            CompoundAssignMinus => BinopKind::CompoundAssignMinus,
             Multiply => BinopKind::Multiply,
-            InplaceMultiply => BinopKind::InplaceMultiply,
+            CompoundAssignMultiply => BinopKind::CompoundAssignMultiply,
             Divide => BinopKind::Divide,
-            InplaceDivide => BinopKind::InplaceDivide,
+            CompoundAssignDivide => BinopKind::CompoundAssignDivide,
             Modulus => BinopKind::Modulus,
-            InplaceModulus => BinopKind::InplaceModulus,
+            CompoundAssignModulus => BinopKind::CompoundAssignModulus,
             _ => panic!(),
         }
     }
 }
 
-impl CompileTarget {
+impl Session {
     pub fn parse(&self) -> Vec<Module> {
         let mut modules = Vec::new();
         let mut lex_errs = Vec::new();
         let mut parse_errs = Vec::new();
-        for (index, file) in self.files.iter().enumerate() {
+        for (index, file) in self.source_map.files.iter().enumerate() {
             let (tokens, mut file_lex_errs) =
-                Cursor::from_file(file, FileId::from_index(index as u64)).into_vec();
+                Cursor::from_file(file, FileId::from_usize(index)).into_vec();
             lex_errs.append(&mut file_lex_errs);
-            match Parser::new(&tokens).parse_module() {
+            match Parser::new(&tokens.as_slice()).parse_module() {
                 Ok(module) => modules.push(module),
                 Err(err) => parse_errs.push(err),
             }
@@ -422,13 +423,14 @@ impl CompileTarget {
         modules
     }
 }
+
 #[cfg(test)]
 mod test {
     use super::*;
     #[test]
     fn parse() {
         let text = "fnc hi(param) { let x = 2; }";
-        let (tokens, errs) = Cursor::from_str(text).into_vec();
+        let (tokens, _errs) = Cursor::from_str(text).into_vec();
         println!("tokens: {:?}", tokens);
         let mut parser = Parser::new(&tokens);
         let module = parser.parse_module().unwrap();

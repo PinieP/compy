@@ -1,44 +1,13 @@
-use clap::ArgGroup;
-use clap::Parser;
+mod ir;
+mod lexer;
+mod parser;
+mod session;
+mod source;
+mod util;
 
-mod compile_target;
-mod frontend;
-
-#[derive(Parser)]
-#[command(version, about, long_about = None)]
-#[clap(group(
-            ArgGroup::new("vers")
-                .args(&["lex", "parse"]),
-        ))]
-struct Args {
-    files: Vec<std::path::PathBuf>,
-    // mode
-    #[clap(long, short, action)]
-    lex: bool,
-    #[clap(long, short, action)]
-    parse: bool,
-}
-
-#[derive(Debug)]
-enum Mode {
-    Lex,
-    Parse,
-    Compile,
-}
-impl Mode {
-    fn from_args(args: &Args) -> Self {
-        if args.lex {
-            Mode::Lex
-        } else if args.parse {
-            Mode::Parse
-        } else {
-            Mode::Compile
-        }
-    }
-}
+#[macro_use]
+extern crate scoped_tls;
 
 fn main() {
-    let args = Args::parse();
-    let mode = Mode::from_args(&args);
-    println!("files: {:?}, mode: {:?}", args.files, mode);
+    todo!();
 }
